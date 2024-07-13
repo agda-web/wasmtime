@@ -3828,6 +3828,7 @@ dependencies = [
  "futures",
  "io-extras",
  "io-lifetimes",
+ "libc",
  "once_cell",
  "rustix",
  "system-interface",

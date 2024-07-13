@@ -63,6 +63,8 @@
 //! }
 //! ```
 
+use libc;
+
 use crate::bindings::{
     cli::{
         stderr::Host as _, stdin::Host as _, stdout::Host as _, terminal_input, terminal_output,
@@ -1312,7 +1314,7 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiP1Ctx {
                 let fs_rights_base = types::Rights::FD_READ;
                 return Ok(types::Fdstat {
                     fs_filetype: (*isatty).into(),
-                    fs_flags: types::Fdflags::empty(),
+                    fs_flags: types::Fdflags::NONBLOCK,
                     fs_rights_base,
                     fs_rights_inheriting: fs_rights_base,
                 });
@@ -1442,21 +1444,41 @@ impl wasi_snapshot_preview1::WasiSnapshotPreview1 for WasiP1Ctx {
         flags: types::Fdflags,
     ) -> Result<(), types::Error> {
         let mut st = self.transact()?;
-        let File {
-            append,
-            blocking_mode,
-            ..
-        } = st.get_file_mut(fd)?;
 
-        // Only support changing the NONBLOCK or APPEND flags.
-        if flags.contains(types::Fdflags::DSYNC)
-            || flags.contains(types::Fdflags::SYNC)
-            || flags.contains(types::Fdflags::RSYNC)
-        {
-            return Err(types::Errno::Inval.into());
+        // st.get_file_mut(fd)
+
+        let fdnum = fd.into();
+
+        if fdnum == 0 {
+            tracing::warn!("fdnum? {}", fdnum);
+            let fdnum = i32::try_from(fdnum)?;
+            let fcntl_flags = unsafe { libc::fcntl(fdnum, libc::F_GETFL) };
+            assert!(fcntl_flags >= 0);
+            let fcntl_flags = if flags.contains(types::Fdflags::NONBLOCK) {
+                fcntl_flags | libc::O_NONBLOCK
+            } else {
+                fcntl_flags & (!libc::O_NONBLOCK)
+            };
+            let ret = unsafe { libc::fcntl(fdnum, libc::F_SETFL, fcntl_flags) };
+            assert!(ret == 0);
+        } else {
+            match st.descriptors.get_mut(&fdnum) {
+                Some(Descriptor::File(file)) => {
+                    let File { append, blocking_mode, .. } = file;
+                    // Only support changing the NONBLOCK or APPEND flags.
+                    if flags.contains(types::Fdflags::DSYNC)
+                        || flags.contains(types::Fdflags::SYNC)
+                        || flags.contains(types::Fdflags::RSYNC)
+                    {
+                        return Err(types::Errno::Inval.into());
+                    }
+                    *append = flags.contains(types::Fdflags::APPEND);
+                    *blocking_mode = BlockingMode::from_fdflags(&flags);
+                },
+                _ => return Err(types::Errno::Badf.into()),
+            }
         }
-        *append = flags.contains(types::Fdflags::APPEND);
-        *blocking_mode = BlockingMode::from_fdflags(&flags);
+
         Ok(())
     }
 

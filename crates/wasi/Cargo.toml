@@ -46,6 +46,7 @@ wasmtime = { workspace = true, features = ['cranelift', 'incremental-cache'] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["event", "fs", "net"] }
+libc = { version = "^0.2", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 io-extras = { workspace = true }
